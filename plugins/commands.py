@@ -205,7 +205,7 @@ async def start(client, message):
     # If no match, assume it's a file request
     files_ = await get_file_details(file_id)
     if not files_:
-        return await message.reply('ɴᴏ ꜱᴜᴄʜ ꜀
+        return await message.reply('ɴᴏ ꜱᴜᴄʜ ꜰɪʟᴇ ᴇxɪꜱᴛꜱ !')
     files = files_[0]
     title = ' '.join(filter(lambda x: not x.startswith('[') and not x.startswith('@'), files.file_name.split()))
     size = get_size(files.file_size)
