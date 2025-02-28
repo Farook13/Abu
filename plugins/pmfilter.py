@@ -2181,8 +2181,6 @@ async def auto_filter(client, msg, spoll=False):
         fuk = await message.reply_text(text=cap, reply_markup=InlineKeyboardMarkup(btn), disable_web_page_preview=True)
         if settings.get('auto_delete', False):
             asyncio.create_task(asyncio.sleep(300) or fuk.delete() or message.delete())
-​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​​
-
 async def advantage_spell_chok(client, msg):
     mv_id = msg.id
     mv_rqst = msg.text
