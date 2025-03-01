@@ -8,20 +8,20 @@ from info import (
 import datetime
 import pytz
 import logging
+import asyncio  # Add this import
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
+# Rest of the file remains unchanged
 class Database:
     def __init__(self, uri, database_name):
         self._client = motor.motor_asyncio.AsyncIOMotorClient(uri)
         self.db = self._client[database_name]
-        self.users = self.db.users  # Collection for users
-        self.groups = self.db.groups  # Collection for groups
-        self.requests = self.db.requests  # Collection for join requests
-        
-        # Ensure indexes for faster queries
+        self.users = self.db.users
+        self.groups = self.db.groups
+        self.requests = self.db.requests
         self._setup_indexes()
 
     def _setup_indexes(self):
@@ -30,8 +30,7 @@ class Database:
         asyncio.create_task(self.groups.create_index("id", unique=True))
         asyncio.create_task(self.requests.create_index("id", unique=True))
         asyncio.create_task(self.users.create_index("expiry_time"))
-
-    # Join Request Methods
+ # Join Request Methods
     async def find_join_req(self, id):
         return bool(await self.requests.find_one({'id': id}))
 
