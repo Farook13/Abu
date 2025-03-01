@@ -2078,7 +2078,6 @@ async def auto_filter(client, msg, spoll=False):
         return await _send_response(client, message, search, files, offset, total_results, settings, curr_time)
 
     # Send a quick placeholder to meet the 3-second target
-    placeholder = await message.reply_text("<b>🔎 Searching...</b>", disable_web_page_preview=True)
 
     # Fetch settings and results concurrently
     settings_task = asyncio.create_task(get_settings(message.chat.id))
