@@ -8,29 +8,34 @@ from info import (
 import datetime
 import pytz
 import logging
-import asyncio  # Add this import
+import asyncio
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
-# Rest of the file remains unchanged
 class Database:
     def __init__(self, uri, database_name):
         self._client = motor.motor_asyncio.AsyncIOMotorClient(uri)
         self.db = self._client[database_name]
-        self.users = self.db.users
-        self.groups = self.db.groups
-        self.requests = self.db.requests
-        self._setup_indexes()
+        self.users = self.db.users  # Collection for users
+        self.groups = self.db.groups  # Collection for groups
+        self.requests = self.db.requests  # Collection for join requests
 
-    def _setup_indexes(self):
+    async def setup_indexes(self):
         """Set up indexes for commonly queried fields."""
-        asyncio.create_task(self.users.create_index("id", unique=True))
-        asyncio.create_task(self.groups.create_index("id", unique=True))
-        asyncio.create_task(self.requests.create_index("id", unique=True))
-        asyncio.create_task(self.users.create_index("expiry_time"))
- # Join Request Methods
+        try:
+            await asyncio.gather(
+                self.users.create_index("id", unique=True),
+                self.groups.create_index("id", unique=True),
+                self.requests.create_index("id", unique=True),
+                self.users.create_index("expiry_time")
+            )
+            logger.info("Database indexes created successfully")
+        except Exception as e:
+            logger.error(f"Failed to create database indexes: {e}")
+
+    # Join Request Methods
     async def find_join_req(self, id):
         return bool(await self.requests.find_one({'id': id}))
 
@@ -215,5 +220,5 @@ class Database:
         }
         await self.users.update_one({"id": int(user_id)}, {"$set": user_data}, upsert=True)
 
-# Instantiate the database
+# Instantiate the database (indexes will be set up later)
 db = Database(DATABASE_URI, DATABASE_NAME)
