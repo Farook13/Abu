@@ -1,122 +1,129 @@
-# https://github.com/odysseusmax/animated-lamp/blob/master/bot/database/database.py
 import motor.motor_asyncio
-from info import DATABASE_NAME, DATABASE_URI, IMDB, IMDB_TEMPLATE, MELCOW_NEW_USERS, P_TTI_SHOW_OFF, SINGLE_BUTTON, SPELL_CHECK_REPLY, PROTECT_CONTENT, AUTO_DELETE, MAX_BTN, AUTO_FFILTER, SHORTLINK_API, SHORTLINK_URL, IS_SHORTLINK, TUTORIAL, IS_TUTORIAL
+from info import (
+    DATABASE_NAME, DATABASE_URI, IMDB, IMDB_TEMPLATE, MELCOW_NEW_USERS, 
+    P_TTI_SHOW_OFF, SINGLE_BUTTON, SPELL_CHECK_REPLY, PROTECT_CONTENT, 
+    AUTO_DELETE, MAX_BTN, AUTO_FFILTER, SHORTLINK_API, SHORTLINK_URL, 
+    IS_SHORTLINK, TUTORIAL, IS_TUTORIAL
+)
 import datetime
 import pytz
+import logging
+
+# Set up logging
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+logger = logging.getLogger(__name__)
 
 class Database:
-    
     def __init__(self, uri, database_name):
         self._client = motor.motor_asyncio.AsyncIOMotorClient(uri)
         self.db = self._client[database_name]
-        self.col = self.db.users
-        self.grp = self.db.groups
-        self.users = self.db.uersz
-        self.req = self.db.requests
+        self.users = self.db.users  # Collection for users
+        self.groups = self.db.groups  # Collection for groups
+        self.requests = self.db.requests  # Collection for join requests
         
+        # Ensure indexes for faster queries
+        self._setup_indexes()
+
+    def _setup_indexes(self):
+        """Set up indexes for commonly queried fields."""
+        asyncio.create_task(self.users.create_index("id", unique=True))
+        asyncio.create_task(self.groups.create_index("id", unique=True))
+        asyncio.create_task(self.requests.create_index("id", unique=True))
+        asyncio.create_task(self.users.create_index("expiry_time"))
+
+    # Join Request Methods
     async def find_join_req(self, id):
-        return bool(await self.req.find_one({'id': id}))
-        
+        return bool(await self.requests.find_one({'id': id}))
+
     async def add_join_req(self, id):
-        await self.req.insert_one({'id': id})
+        await self.requests.insert_one({'id': id})
+
     async def del_join_req(self):
-        await self.req.drop()
+        await self.requests.drop()
 
-    def new_user(self, id, name):
-        return dict(
-            id = id,
-            name = name,
-            ban_status=dict(
-                is_banned=False,
-                ban_reason="",
-            ),
-        )
+    # User Factory Methods
+    @staticmethod
+    def new_user(id, name):
+        return {
+            "id": id,
+            "name": name,
+            "ban_status": {
+                "is_banned": False,
+                "ban_reason": "",
+            },
+            "has_free_trial": False,
+            "expiry_time": None
+        }
 
+    @staticmethod
+    def new_group(id, title):
+        return {
+            "id": id,
+            "title": title,
+            "chat_status": {
+                "is_disabled": False,
+                "reason": "",
+            }
+        }
 
-    def new_group(self, id, title):
-        return dict(
-            id = id,
-            title = title,
-            chat_status=dict(
-                is_disabled=False,
-                reason="",
-            ),
-        )
-    
+    # User Management
     async def add_user(self, id, name):
         user = self.new_user(id, name)
-        await self.col.insert_one(user)
-    
+        await self.users.insert_one(user)
+
     async def is_user_exist(self, id):
-        user = await self.col.find_one({'id':int(id)})
-        return bool(user)
-    
+        return bool(await self.users.find_one({'id': int(id)}))
+
     async def total_users_count(self):
-        count = await self.col.count_documents({})
-        return count
-    
+        return await self.users.count_documents({})
+
     async def remove_ban(self, id):
-        ban_status = dict(
-            is_banned=False,
-            ban_reason=''
+        await self.users.update_one(
+            {'id': int(id)},
+            {'$set': {'ban_status': {"is_banned": False, "ban_reason": ""}}}
         )
-        await self.col.update_one({'id': id}, {'$set': {'ban_status': ban_status}})
-    
+
     async def ban_user(self, user_id, ban_reason="No Reason"):
-        ban_status = dict(
-            is_banned=True,
-            ban_reason=ban_reason
+        await self.users.update_one(
+            {'id': int(user_id)},
+            {'$set': {'ban_status': {"is_banned": True, "ban_reason": ban_reason}}}
         )
-        await self.col.update_one({'id': user_id}, {'$set': {'ban_status': ban_status}})
 
     async def get_ban_status(self, id):
-        default = dict(
-            is_banned=False,
-            ban_reason=''
-        )
-        user = await self.col.find_one({'id':int(id)})
-        if not user:
-            return default
-        return user.get('ban_status', default)
+        default = {"is_banned": False, "ban_reason": ""}
+        user = await self.users.find_one({'id': int(id)})
+        return user.get('ban_status', default) if user else default
 
     async def get_all_users(self):
-        return self.col.find({})
-    
+        return self.users.find({})
 
     async def delete_user(self, user_id):
-        await self.col.delete_many({'id': int(user_id)})
+        await self.users.delete_many({'id': int(user_id)})
 
-
+    # Banned Users/Chats
     async def get_banned(self):
-        users = self.col.find({'ban_status.is_banned': True})
-        chats = self.grp.find({'chat_status.is_disabled': True})
-        b_chats = [chat['id'] async for chat in chats]
-        b_users = [user['id'] async for user in users]
-        return b_users, b_chats
-    
+        banned_users = [user['id'] async for user in self.users.find({'ban_status.is_banned': True})]
+        banned_chats = [chat['id'] async for chat in self.groups.find({'chat_status.is_disabled': True})]
+        return banned_users, banned_chats
 
-
+    # Chat Management
     async def add_chat(self, chat, title):
-        chat = self.new_group(chat, title)
-        await self.grp.insert_one(chat)
-    
+        chat_doc = self.new_group(chat, title)
+        await self.groups.insert_one(chat_doc)
 
     async def get_chat(self, chat):
-        chat = await self.grp.find_one({'id':int(chat)})
-        return False if not chat else chat.get('chat_status')
-    
+        chat = await self.groups.find_one({'id': int(chat)})
+        return chat.get('chat_status') if chat else False
 
     async def re_enable_chat(self, id):
-        chat_status=dict(
-            is_disabled=False,
-            reason="",
-            )
-        await self.grp.update_one({'id': int(id)}, {'$set': {'chat_status': chat_status}})
-        
+        await self.groups.update_one(
+            {'id': int(id)},
+            {'$set': {'chat_status': {"is_disabled": False, "reason": ""}}}
+        )
+
     async def update_settings(self, id, settings):
-        await self.grp.update_one({'id': int(id)}, {'$set': {'settings': settings}})
-        
-    
+        await self.groups.update_one({'id': int(id)}, {'$set': {'settings': settings}})
+
     async def get_settings(self, id):
         default = {
             'button': SINGLE_BUTTON,
@@ -135,87 +142,79 @@ class Database:
             'tutorial': TUTORIAL,
             'is_tutorial': IS_TUTORIAL
         }
-        chat = await self.grp.find_one({'id':int(id)})
-        if chat:
-            return chat.get('settings', default)
-        return default
-    
+        chat = await self.groups.find_one({'id': int(id)})
+        return chat.get('settings', default) if chat else default
 
     async def disable_chat(self, chat, reason="No Reason"):
-        chat_status=dict(
-            is_disabled=True,
-            reason=reason,
-            )
-        await self.grp.update_one({'id': int(chat)}, {'$set': {'chat_status': chat_status}})
-    
+        await self.groups.update_one(
+            {'id': int(chat)},
+            {'$set': {'chat_status': {"is_disabled": True, "reason": reason}}}
+        )
 
     async def total_chat_count(self):
-        count = await self.grp.count_documents({})
-        return count
-    
+        return await self.groups.count_documents({})
 
     async def get_all_chats(self):
-        return self.grp.find({})
-
+        return self.groups.find({})
 
     async def get_db_size(self):
-        return (await self.db.command("dbstats"))['dataSize']
+        stats = await self.db.command("dbstats")
+        return stats['dataSize']
 
+    # Premium User Management
     async def get_user(self, user_id):
-        user_data = await self.users.find_one({"id": user_id})
-        return user_data
+        return await self.users.find_one({"id": int(user_id)})
+
     async def update_user(self, user_data):
-        await self.users.update_one({"id": user_data["id"]}, {"$set": user_data}, upsert=True)
+        await self.users.update_one(
+            {"id": user_data["id"]},
+            {"$set": user_data},
+            upsert=True
+        )
 
     async def has_premium_access(self, user_id):
         user_data = await self.get_user(user_id)
-        if user_data:
-            expiry_time = user_data.get("expiry_time")
-            if expiry_time is None:
-                # User previously used the free trial, but it has ended.
-                return False
-            elif isinstance(expiry_time, datetime.datetime) and datetime.datetime.now() <= expiry_time:
-                return True
-            else:
-                await self.users.update_one({"id": user_id}, {"$set": {"expiry_time": None}})
+        if not user_data:
+            return False
+        expiry_time = user_data.get("expiry_time")
+        if expiry_time is None:
+            return False
+        now = datetime.datetime.now(pytz.UTC)
+        if isinstance(expiry_time, datetime.datetime) and now <= expiry_time:
+            return True
+        await self.remove_premium_access(user_id)
         return False
-        
-    async def update_user(self, user_data):
-        await self.users.update_one({"id": user_data["id"]}, {"$set": user_data}, upsert=True)
 
     async def update_one(self, filter_query, update_data):
         try:
-            # Assuming self.client and self.users are set up properly
             result = await self.users.update_one(filter_query, update_data)
-            return result.matched_count == 1
+            return result.matched_count > 0
         except Exception as e:
-            print(f"Error updating document: {e}")
+            logger.error(f"Error updating document: {e}")
             return False
 
     async def get_expired(self, current_time):
-        expired_users = []
-        if data := self.users.find({"expiry_time": {"$lt": current_time}}):
-            async for user in data:
-                expired_users.append(user)
-        return expired_users
+        return [user async for user in self.users.find({"expiry_time": {"$lt": current_time}})]
 
     async def remove_premium_access(self, user_id):
         return await self.update_one(
-            {"id": user_id}, {"$set": {"expiry_time": None}}
+            {"id": int(user_id)},
+            {"$set": {"expiry_time": None}}
         )
 
     async def check_trial_status(self, user_id):
         user_data = await self.get_user(user_id)
-        if user_data:
-            return user_data.get("has_free_trial", False)
-        return False
+        return user_data.get("has_free_trial", False) if user_data else False
 
     async def give_free_trial(self, user_id):
-        #await set_free_trial_status(user_id)
-        user_id = user_id
-        seconds = 5*60         
-        expiry_time = datetime.datetime.now() + datetime.timedelta(seconds=seconds)
-        user_data = {"id": user_id, "expiry_time": expiry_time, "has_free_trial": True}
-        await self.users.update_one({"id": user_id}, {"$set": user_data}, upsert=True)
-        
+        seconds = 5 * 60  # 5 minutes
+        expiry_time = datetime.datetime.now(pytz.UTC) + datetime.timedelta(seconds=seconds)
+        user_data = {
+            "id": int(user_id),
+            "expiry_time": expiry_time,
+            "has_free_trial": True
+        }
+        await self.users.update_one({"id": int(user_id)}, {"$set": user_data}, upsert=True)
+
+# Instantiate the database
 db = Database(DATABASE_URI, DATABASE_NAME)
