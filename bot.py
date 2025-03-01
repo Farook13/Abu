@@ -70,7 +70,8 @@ async def lazy_start():
     init_tasks = [
         initialize_clients(),
         preload_plugins(),
-        Media.ensure_indexes(),
+        db.setup_indexes(),  # Setup database indexes here
+        Media.ensure_indexes(),  # From ia_filterdb.py
         db.get_banned()
     ]
     results = await asyncio.gather(*init_tasks)
@@ -103,7 +104,7 @@ async def lazy_start():
     bind_address = "0.0.0.0"
     await web.TCPSite(app, bind_address, PORT).start()
     
-    # Keep alive for Heroku
+    # Keep alive for Heroku/Koyeb
     if ON_HEROKU:
         asyncio.create_task(ping_server())
     
